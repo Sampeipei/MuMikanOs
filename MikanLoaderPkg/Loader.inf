@@ -9,7 +9,7 @@
 [Sources]
     Main.c
 
-[Pakages]
+[Packages]
     MdePkg/MdePkg.dec
 
 [LibraryClasses]
