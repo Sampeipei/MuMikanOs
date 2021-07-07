@@ -24,7 +24,7 @@
     PrintLib|MdePkg/Library/BasePrintLib/BasePrintLib.inf
     UefiBootServicesTableLib|MdePkg/Library/UefiBootServicesTableLib/UefiBootServicesTableLib.inf
     UefiRuntimeServicesTableLib|MdePkg/Library/UefiRuntimeServicesTableLib/UefiRuntimeServicesTableLib.inf
-
+    
 #@range_begin(components)
 [Components]
     MikanLoaderPkg/Loader.inf
