@@ -3,12 +3,14 @@
 #include  <Library/UefiBootServicesTableLib.h>
 #include  <Library/PrintLib.h>
 #include  <Library/MemoryAllocationLib.h>
+#include  <Library/BaseMemoryLib.h>
 #include  <Protocol/LoadedImage.h>
 #include  <Protocol/SimpleFileSystem.h>
 #include  <Protocol/DiskIo2.h>
 #include  <Protocol/BlockIo.h>
 #include  <Guid/FileInfo.h>
 #include "frame_buffer_config.hpp"
+#include "elf.hpp"
 
 // #@@range_begin(struct_memory_map)
 struct MemoryMap
@@ -41,36 +43,40 @@ EFI_STATUS GetMemoryMap(struct MemoryMap* map) {
 // #@@range_begin()
 const CHAR16* GetMemoryTypeUnicode(EFI_MEMORY_TYPE type) {
     switch (type){
-    case EfiReservedMemoryType: return L"EfiReservedMemoryType";
-    case EfiLoaderCode: return L"EfiLoaderCode";
-    case EfiLoaderData: return L"EfiLoaderData";
-    case EfiBootServicesCode: return L"EfiBootServicesCode";
-    case EfiBootServicesData: return L"EfiBootServicesData";
-    case EfiRuntimeServicesCode: return L"EfiRuntimeServicesCode";
-    case EfiRuntimeServicesData: return L"EfiRuntimeServicesData";
-    case EfiConventionalMemory: return L"EfiConventionalMemory";
-    case EfiUnusableMemory: return L"EfiUnusableMemory";
-    case EfiACPIReclaimMemory: return L"EfiACPIReclaimMemory";
-    case EfiACPIMemoryNVS: return L"EfiACPIMemoryNVS";
-    case EfiMemoryMappedIO: return L"EfiMemoryMappedIO";
-    case EfiMemoryMappedIOPortSpace: return L"EfiMemoryMappedIOPortSpace";
-    case EfiPalCode: return L"EfiPalCode";
-    case EfiPersistentMemory: return L"EfiPersistentMemory";
-    case EfiMaxMemoryType: return L"EfiMaxMemoryType";
-    default: return L"InvalidMemoryType";
+        case EfiReservedMemoryType: return L"EfiReservedMemoryType";
+        case EfiLoaderCode: return L"EfiLoaderCode";
+        case EfiLoaderData: return L"EfiLoaderData";
+        case EfiBootServicesCode: return L"EfiBootServicesCode";
+        case EfiBootServicesData: return L"EfiBootServicesData";
+        case EfiRuntimeServicesCode: return L"EfiRuntimeServicesCode";
+        case EfiRuntimeServicesData: return L"EfiRuntimeServicesData";
+        case EfiConventionalMemory: return L"EfiConventionalMemory";
+        case EfiUnusableMemory: return L"EfiUnusableMemory";
+        case EfiACPIReclaimMemory: return L"EfiACPIReclaimMemory";
+        case EfiACPIMemoryNVS: return L"EfiACPIMemoryNVS";
+        case EfiMemoryMappedIO: return L"EfiMemoryMappedIO";
+        case EfiMemoryMappedIOPortSpace: return L"EfiMemoryMappedIOPortSpace";
+        case EfiPalCode: return L"EfiPalCode";
+        case EfiPersistentMemory: return L"EfiPersistentMemory";
+        case EfiMaxMemoryType: return L"EfiMaxMemoryType";
+        default: return L"InvalidMemoryType";
     }
 }
 // #@@range_end()
 
 // #@@range_begin(save_money_map)
 EFI_STATUS SaveMemoryMap(struct MemoryMap* map, EFI_FILE_PROTOCOL* file) {
+    EFI_STATUS status;
     CHAR8 buf[256];
     UINTN len;
 
     CHAR8* header = 
         "Index, Type, Type(name), PhysicalStart, NumberOfPages, Attribute\n";
     len = AsciiStrLen(header);
-    file->Write(file, &len, header);
+    status = file->Write(file, &len, header);
+    if (EFI_ERROR(status)) {
+        return status;
+    }
 
     Print(L"map->buffer = %08lx, map->map_size = %08lx\n",
         map->buffer, map->map_size);
@@ -87,55 +93,72 @@ EFI_STATUS SaveMemoryMap(struct MemoryMap* map, EFI_FILE_PROTOCOL* file) {
             i, desc->Type, GetMemoryTypeUnicode(desc->Type),
             desc->PhysicalStart, desc->NumberOfPages,
             desc->Attribute & 0xffffflu);
-        file->Write(file, &len, buf);
+        status = file->Write(file, &len, buf);
+        if (EFI_ERROR(status)) {
+            return status;
+        }
     }
+
     return EFI_SUCCESS;
 }
 // #@@range_end(save_money_map)
 
 EFI_STATUS OpenRootDir(EFI_HANDLE image_handle, EFI_FILE_PROTOCOL** root){
+    EFI_STATUS status;
     EFI_LOADED_IMAGE_PROTOCOL* loaded_image;
     EFI_SIMPLE_FILE_SYSTEM_PROTOCOL* fs;
 
-    gBS->OpenProtocol(
+    status = gBS->OpenProtocol(
       image_handle,
       &gEfiLoadedImageProtocolGuid,
       (VOID**)&loaded_image,
       image_handle,
       NULL,
       EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL);
+    if (EFI_ERROR(status)) {
+        return status;
+    }
 
-    gBS->OpenProtocol(
+    status = gBS->OpenProtocol(
       loaded_image->DeviceHandle,
       &gEfiSimpleFileSystemProtocolGuid,
       (VOID**)&fs,
       image_handle,
       NULL,
       EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL);
+    if (EFI_ERROR(status)) {
+        return status;
+    }
 
-    fs->OpenVolume(fs, root);
-
-    return EFI_SUCCESS;
+    return fs->OpenVolume(fs, root);
 }
 
 // OpenGOP
 EFI_STATUS OpenGOP(EFI_HANDLE image_handle, EFI_GRAPHICS_OUTPUT_PROTOCOL** gop) {
+    EFI_STATUS status;
     UINTN num_gop_handles = 0;
     EFI_HANDLE* gop_handles = NULL;
-    gBS->LocateHandleBuffer(
+
+    status = gBS->LocateHandleBuffer(
         ByProtocol,
         &gEfiGraphicsOutputProtocolGuid,
         NULL,
         &num_gop_handles,
         &gop_handles);
+    if (EFI_ERROR(status)) {
+        return status;
+    }
 
-    gBS->OpenProtocol(
+    status = gBS->OpenProtocol(
         gop_handles[0],
         &gEfiGraphicsOutputProtocolGuid,
         (VOID**)gop,
         image_handle,
         NULL,
         EFI_OPEN_PROTOCOL_BY_HANDLE_PROTOCOL);
+    if (EFI_ERROR(status)) {
+        return status;
+    }
 
     FreePool(gop_handles);
 
@@ -164,6 +187,36 @@ void Halt(void) {
     while (1) __asm__("hlt");
 }
 // #@@range_end(halt)
+
+// #@@range_begin(calc_addr_func)
+void CalcLoadAddressRange(Elf64_Ehdr* ehdr, UINT64* first, UINT64* last) {
+    Elf64_Phdr* phdr = (Elf64_Phdr*)((UINT64)ehdr + ehdr->e_phoff);
+    *first = MAX_UINT64;
+    *last = 0;
+    for (Elf64_Half i = 0; i < ehdr->e_phnum; ++i) {
+        if (phdr[i].p_type != PT_LOAD) continue;
+        *first = MIN(*first, phdr[i].p_vaddr);
+        *last = MAX(*last, phdr[i].p_vaddr + phdr[i].p_memsz);
+    }
+}
+// #@@range_end(calc_addr_func)
+
+// #@@range_begin(copy_segm_func)
+void CopyLoadSegments(Elf64_Ehdr* ehdr) {
+    Elf64_Phdr *phdr = (Elf64_Phdr *)((UINT64)ehdr + ehdr->e_phoff);
+    for (Elf64_Half i = 0; i < ehdr->e_phnum; ++i) {
+        if (phdr[i].p_type != PT_LOAD) continue;
+
+        UINT64 segm_in_file = (UINT64)ehdr + phdr[i].p_offset;
+        CopyMem((VOID*)phdr[i].p_vaddr, (VOID*)segm_in_file, phdr[i].p_filesz);
+
+        UINTN remain_bytes = phdr[i].p_memsz - phdr[i].p_filesz;
+        SetMem((VOID*)(phdr[i].p_vaddr + phdr[i].p_filesz), remain_bytes, 0);
+    }
+}
+
+// #@@range_end(copy_segm_func)
+
 
 EFI_STATUS EFIAPI UefiMain(
         EFI_HANDLE image_handle,
@@ -232,7 +285,6 @@ EFI_STATUS EFIAPI UefiMain(
     }
     // @@range_end(gop)
 
-    // @@range_end(read_kernel)
     EFI_FILE_PROTOCOL *kernel_file;
     status = root_dir->Open(
         root_dir, &kernel_file, L"\\kernel.elf",
@@ -252,25 +304,48 @@ EFI_STATUS EFIAPI UefiMain(
         Halt();
     }
 
-    EFI_FILE_INFO* file_info = (EFI_FILE_INFO*)file_info_buffer;
+    // #@@range_begin(read_kernel)
+    EFI_FILE_INFO *file_info = (EFI_FILE_INFO*)file_info_buffer;
     UINTN kernel_file_size = file_info->FileSize;
 
-    EFI_PHYSICAL_ADDRESS kernel_base_addr = 0x100000;
-    status = gBS->AllocatePages(
-        AllocateAddress, EfiLoaderData,
-        (kernel_file_size + 0xfff) / 0x1000, &kernel_base_addr);
+    VOID* kernel_buffer;
+    status = gBS->AllocatePool(EfiLoaderData, kernel_file_size, &kernel_buffer);
+    if (EFI_ERROR(status)) {
+        Print(L"failed tp allocate pool: %r\n", status);
+        Halt();
+    }
+    status = kernel_file->Read(kernel_file, &kernel_file_size, kernel_buffer);
+    if (EFI_ERROR(status)) {
+        Print(L"error: %r", status);
+        Halt();
+    }
+    // #@@range_end(read_kernel)
+
+    // #@@range_begin(alloc_pages)
+    Elf64_Ehdr* kernel_ehdr = (Elf64_Ehdr*)kernel_buffer;
+    UINT64 kernel_first_addr, kernel_last_addr;
+    CalcLoadAddressRange(kernel_ehdr, &kernel_first_addr, &kernel_last_addr);
+
+    UINTN num_pages = (kernel_last_addr - kernel_first_addr + 0xfff) / 0x1000;
+    status = gBS->AllocatePages(AllocateAddress, EfiLoaderData,
+                                num_pages, &kernel_first_addr);
     if (EFI_ERROR(status)) {
         Print(L"failed to allocate pages: %r\n", status);
         Halt();
     }
-    status = kernel_file->Read(kernel_file, &kernel_file_size, (VOID*)kernel_base_addr);
+    // #@@range_end(alloc_pages)
+
+    // #@@range_begin(copy_segments)
+    CopyLoadSegments(kernel_ehdr);
+    Print(L"Kernel: 0x%0lx - 0x%0lx\n", kernel_first_addr, kernel_last_addr);
+
+    status = gBS->FreePool(kernel_buffer);
     if (EFI_ERROR(status)) {
-        Print(L"error: %r\n", status);
+        Print(L"failed to free pool: %r\n", status);
         Halt();
     }
-    Print(L"Kernel: 0x%0lx (%lu bytes)\n", kernel_base_addr, kernel_file_size);
-    // @@range_end(read_kernel)
-
+    // #@@range_end(copy_segments)
+    
     // @@range_begin(exit_bs)
     status = gBS->ExitBootServices(image_handle, memmap.map_key);
     if (EFI_ERROR(status)) {
@@ -287,7 +362,7 @@ EFI_STATUS EFIAPI UefiMain(
     }
     // @@range_end(exit_bs)
 
-    UINT64 entry_addr = *(UINT64 *)(kernel_base_addr + 24);
+    UINT64 entry_addr = *(UINT64 *)(kernel_first_addr + 24);
 
 
     // @@range_begin(pass_frame_buffer_config)
